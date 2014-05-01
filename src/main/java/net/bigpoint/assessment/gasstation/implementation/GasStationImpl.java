@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import net.bigpoint.assessment.gasstation.GasPump;
 import net.bigpoint.assessment.gasstation.GasStation;
@@ -19,15 +20,18 @@ import net.bigpoint.assessment.gasstation.exceptions.PriceNotSetException;
 public class GasStationImpl implements GasStation {
 	Collection<GasPump> gasPumpsOnThisStation = Collections
 			.synchronizedList(new ArrayList<GasPump>());
-	private int numberOfSuccessfulSales = 0;
-	private int numberOfCancellationsNoGas = 0;
-	private int numberOfCancellationsTooExpensive = 0;
+	private AtomicInteger numberOfSuccessfulSales = new AtomicInteger(0);
+	private AtomicInteger numberOfCancellationsNoGas = new AtomicInteger(0);
+	private AtomicInteger numberOfCancellationsTooExpensive = new AtomicInteger(
+			0);
 	private double totalRevenue = 0.0;
 	private Map<GasType, Double> gasPrices = Collections
 			.synchronizedMap(new HashMap<GasType, Double>());
 
-	public synchronized void addGasPump(GasPump pump) {
-		gasPumpsOnThisStation.add(pump);
+	public void addGasPump(GasPump pump) {
+		synchronized (gasPumpsOnThisStation) {
+			gasPumpsOnThisStation.add(pump);
+		}
 	}
 
 	/*
@@ -36,7 +40,7 @@ public class GasStationImpl implements GasStation {
 	 * @param gasPumpsToCopy a collection of gas pumps which we would like to
 	 * copy
 	 */
-	private synchronized Collection<GasPump> getCopyOfGasPumps(
+	private Collection<GasPump> getCopyOfGasPumps(
 			Collection<GasPump> gasPumpsToCopy) {
 		Iterator<GasPump> gasPumpsIterator = gasPumpsToCopy.iterator();
 		Collection<GasPump> copyGasPumps = new ArrayList<GasPump>();
@@ -50,8 +54,10 @@ public class GasStationImpl implements GasStation {
 		return copyGasPumps;
 	}
 
-	public synchronized Collection<GasPump> getGasPumps() {
-		return getCopyOfGasPumps(gasPumpsOnThisStation);
+	public Collection<GasPump> getGasPumps() {
+		synchronized (gasPumpsOnThisStation) {
+			return getCopyOfGasPumps(gasPumpsOnThisStation);
+		}
 	}
 
 	/*
@@ -79,23 +85,23 @@ public class GasStationImpl implements GasStation {
 		return gasPump;
 	}
 
-	private synchronized void incrementNumberOfCancelationsTooExpensive() {
-		numberOfCancellationsTooExpensive++;
+	private void incrementNumberOfCancelationsTooExpensive() {
+		numberOfCancellationsTooExpensive.incrementAndGet();
 	}
 
-	private synchronized void incrementNumberOfCancelationsNoGas() {
-		numberOfCancellationsNoGas++;
+	private void incrementNumberOfCancelationsNoGas() {
+		numberOfCancellationsNoGas.incrementAndGet();
 	}
 
-	private synchronized void incrementNumberOfSuccessfulSales() {
-		numberOfSuccessfulSales++;
+	private void incrementNumberOfSuccessfulSales() {
+		numberOfSuccessfulSales.incrementAndGet();
 	}
 
 	private synchronized void incrementTotalRevenueBy(double value) {
 		totalRevenue += value;
 	}
 
-	public synchronized double buyGas(GasType type, double amountInLiters,
+	public double buyGas(GasType type, double amountInLiters,
 			double maxPricePerLiter) throws NotEnoughGasException,
 			GasTooExpensiveException {
 		if (maxPricePerLiter < 0)
@@ -110,16 +116,17 @@ public class GasStationImpl implements GasStation {
 			incrementNumberOfCancelationsTooExpensive();
 			throw new GasTooExpensiveException();
 		}
-		GasPump gasPumpWithEnoughGas = getGasPumpWhichIsAbleToProvideThisTypeOfGas(
-				type, amountInLiters);
-		if (gasPumpWithEnoughGas == null) {
-			incrementNumberOfCancelationsNoGas();
-			throw new NotEnoughGasException();
+		synchronized (gasPumpsOnThisStation) {
+			GasPump gasPumpWithEnoughGas = getGasPumpWhichIsAbleToProvideThisTypeOfGas(
+					type, amountInLiters);
+			if (gasPumpWithEnoughGas == null) {
+				incrementNumberOfCancelationsNoGas();
+				throw new NotEnoughGasException();
+			}
+			gasPumpWithEnoughGas.pumpGas(amountInLiters);
+			incrementNumberOfSuccessfulSales();
+			incrementTotalRevenueBy(actualPrice);
 		}
-
-		incrementNumberOfSuccessfulSales();
-		incrementTotalRevenueBy(actualPrice);
-		gasPumpWithEnoughGas.pumpGas(amountInLiters);
 
 		return actualPrice;
 	}
@@ -129,15 +136,15 @@ public class GasStationImpl implements GasStation {
 	}
 
 	public synchronized int getNumberOfSales() {
-		return numberOfSuccessfulSales;
+		return numberOfSuccessfulSales.intValue();
 	}
 
 	public synchronized int getNumberOfCancellationsNoGas() {
-		return numberOfCancellationsNoGas;
+		return numberOfCancellationsNoGas.intValue();
 	}
 
-	public synchronized int getNumberOfCancellationsTooExpensive() {
-		return numberOfCancellationsTooExpensive;
+	public int getNumberOfCancellationsTooExpensive() {
+		return numberOfCancellationsTooExpensive.intValue();
 	}
 
 	public synchronized double getPrice(GasType type)
